@@ -1,1 +1,5 @@
 This project was created as part of the peer assessed element of the Practical Machine Learning module, part of Coursera’s Data Science Specialization offered by the John’s Hopkins Bloomburg school of public health.
+
+The html version of the PML.Rmd file can be found in the gh-pages branch and viewed on line here:
+
+http://jamiefharwood.github.io/MachineLearningProject/PML.html
