@@ -19,7 +19,7 @@ I have assumed that the 2000 word limit applies to the text of the submission, n
 
 ### Data Preparation
 
-First, download the data and load it into R.  Produce a summary of the document to establish dimensions and data types:
+First, download the data and load it into R.
 
 ```{r cache=F}
 ## For training and test
@@ -30,7 +30,7 @@ data.quiz <- read.table(file = "http://d396qusza40orc.cloudfront.net/predmachlea
 ```
 
 
-A visual inspection of the raw data shows that there are a number of columns where almost all rows are NA.  The exception appears to be when the new_window column is set to "yes".  For these rows all columns are populated although some clearly have invalid values such as "#DIV/0!" which suggests the data was at some point in a spreadsheet application and has since been corrupted.  The names of the columns that are mostly NA have prefixes such as "max", "min", "avg", "skew"" etc. and appear to be summarised values for the rows above, i.e the current "window".  This assumption is supported by the original paper which names 17 of these summarised columns as the data used in the original trial.  As the values in these columns are mostly NA and those that are not NA appear to be corrupted, and given the fact that none of these columns have values in the test set,  I decided to remove all of them.  Of the remaining columns the first seven appear to be too specific to the training set for them to generalise well to a prediction from a different sample.  For example we would not want to build a prediction based upon the subject's name or the time they did the exercise:
+A visual inspection of the raw data shows that there are a number of columns where almost all values are NA.  The exception appears to be when the new_window column is set to "yes".  For these rows all columns are populated although some clearly have invalid values such as "#DIV/0!" which suggests the data was at some point in a spreadsheet application and has since been corrupted.  The names of the columns that are mostly NA have prefixes such as "max", "min", "avg", "skew"" etc. and appear to be summarised values for the rows above, i.e the current "window".  This assumption is supported by the original paper which names 17 of these summarised columns as the data used in the original trial.  As the values in these columns are mostly NA and those that are not NA appear to be corrupted, and given the fact that none of these columns have values in the test set,  I decided to remove all of them.  Of the remaining columns the first seven appear to be too specific to the training set for them to generalise well to a prediction from a different sample.  For example we would not want to build a prediction based upon the subject's name or the time they did the exercise:
 
 ```{r cache=F}
 ## NA cols
@@ -62,7 +62,7 @@ testing <- data.supplied.clean[-inTrain,]
 
 ### Exploratory Data Analysis
 
-Next, we explore correlations between our variables by visualising those correllations between variables that are greater than &plusm;0.75
+Next, we explore correlations between our variables by visualising those correlations between variables that are greater than +/- 0.75
 
 ```{r comment = ""}
 ## Get pairwise correlations and compute one side of diagonal
@@ -161,7 +161,7 @@ for(model in models)
 
 ### Model Evaluation and Comparison
 
-We now have 6 models which we can use to predict outcomes.  Before we do that, we check to see how well our models performed against the training data they were built uppon by interogating their resampling distributions:
+We now have 6 models which we can use to predict outcomes.  Before we do that, we check to see how well our models performed against the training data they were built upon by interrogating their resampling distributions:
 
 ```{r }
 
@@ -223,7 +223,7 @@ for(model_data in names(fits))
 
 ```
 
-We can see from the above that the Random Forest Model performs the best in terms of accuracy and kappa with values of 0,.992 and 0.99 respectively.  The rpart model using pca data was the worst performing combination (accuracy=0.34, kapp=0.197) and of particular note is its failure to predict outcomes for class C with a sensitivity of 0 and a specificity of 1.0.
+We can see from the above that the Random Forest Model performs the best in terms of accuracy and kappa with values of 0.99 and 0.987 respectively.  The rpart model using pca data was the worst performing combination (accuracy=0.402, kappa=0.199) and of particular note is its failure to predict outcomes for class C with a sensitivity of 0 and a specificity of 1.0.
 
 ### Predictions by model
 
