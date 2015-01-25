@@ -256,7 +256,7 @@ kable(ooseDf, "html", table.attr='class="flat-table"')
 
 ```
 
-### Final model selection
+### Final Model Selection
 
 The model analysis above strongly suggests that the Random Forest model using the full training set is likely to give the most accurate results for predicting our 20 problem ids.  This model was the one finally chosen for submission.
 
