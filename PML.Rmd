@@ -1,0 +1,268 @@
+---
+output:
+  html_document:
+    css: custom.css
+    fig_height: 6
+    fig_width: 10
+    highlight: kate
+    theme: cerulean
+---
+
+## Human Activity Recognition
+
+
+### Machine Learning Project
+
+This written assignment answers the peer assessed element of the Practical Machine Learning module, part of Coursera's Data Science Specialization offered by the John's Hopkins Bloomburg school of public health.  The data used for the assignment comes from http://groupware.les.inf.puc-rio.br/har and was originally used for research into whether machine learning could be used to predict how well an individual performs a weight lifting exercise compared to its formal specification.
+
+I have assumed that the 2000 word limit applies to the text of the submission, not the R code and that the limit of 5 figures relates to charts and tables, not the output of R commands.
+
+### Data Preparation
+
+First, download the data and load it into R.  Produce a summary of the document to establish dimensions and data types:
+
+```{r cache=F}
+## For training and test
+data.supplied <- read.table(file = "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", sep=',',header=T, quote='"', na.strings = c("", NA))
+## For prediction exercise
+data.quiz <- read.table(file = "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", sep=',', header=T, quote='"', na.strings = c("", NA))
+
+```
+
+
+A visual inspection of the raw data shows that there are a number of columns where almost all rows are NA.  The exception appears to be when the new_window column is set to "yes".  For these rows all columns are populated although some clearly have invalid values such as "#DIV/0!" which suggests the data was at some point in a spreadsheet application and has since been corrupted.  The names of the columns that are mostly NA have prefixes such as "max", "min", "avg", "skew"" etc. and appear to be summarised values for the rows above, i.e the current "window".  This assumption is supported by the original paper which names 17 of these summarised columns as the data used in the original trial.  As the values in these columns are mostly NA and those that are not NA appear to be corrupted, and given the fact that none of these columns have values in the test set,  I decided to remove all of them.  Of the remaining columns the first seven appear to be too specific to the training set for them to generalise well to a prediction from a different sample.  For example we would not want to build a prediction based upon the subject's name or the time they did the exercise:
+
+```{r cache=F}
+## NA cols
+colsToKeep <- names(data.supplied)[!is.na(data.supplied[1,])]
+## First seven cols
+colsToKeep <- colsToKeep[-c(1,2,3,4,5,6,7)]
+data.supplied.clean <- subset(data.supplied, select = colsToKeep)
+
+colsToKeep <- names(data.quiz)[!is.na(data.quiz[1,])]
+colsToKeep <- colsToKeep[-c(1,2,3,4,5,6,7)]
+data.quiz.clean <- subset(data.quiz, select = colsToKeep)
+
+
+```
+
+
+We now have a clean data set consisting of 52 numeric variables and one outcome across 19,622 observations.  The next step is to split the data into training and test:
+
+```{r message = FALSE}
+options(width=150)
+library(caret)
+inTrain <- createDataPartition(y=data.supplied.clean$classe, p=.6, list=F)
+training <- data.supplied.clean[inTrain,]
+testing <- data.supplied.clean[-inTrain,]
+
+```
+
+
+
+### Exploratory Data Analysis
+
+Next, we explore correlations between our variables by visualising those correllations between variables that are greater than &plusm;0.75
+
+```{r comment = ""}
+## Get pairwise correlations and compute one side of diagonal
+cordf <- as.data.frame(cor(training[-53]))
+cordf[upper.tri(cordf)] <- NA
+pairNames <-character()
+values <- numeric()
+## loop to find pairs over our .75 threshold
+for(x in names(cordf))
+{
+  for(y in names(cordf))
+  {
+    if(x != y & !is.na(cordf[x,y]) & 
+        (
+          (cordf[x,y] < 1 & cordf[x,y] >= 0.75) | (cordf[x,y] > -1 & cordf[x,y] <= -0.75)
+        )
+      ) {
+      pairNames <- c(pairNames, paste0(x,"_",y))
+      values <- c(values,cordf[x,y])
+    }
+  }
+}
+
+## plot it
+library(ggplot2)
+hiCorDf <- data.frame(pairNames, values)
+hiCorDf <- hiCorDf[order(abs(hiCorDf$values), decreasing = T),]
+hiCorDf$order <- seq(length(pairNames),1)
+ggplot(hiCorDf) + 
+  geom_bar(aes(x = reorder(pairNames,order), y=values), stat="identity", position="identity", fill="#0075ee") + coord_flip() + 
+  ylab("Pair Names") + xlab("Values") + 
+  ggtitle("Pairwise correlations over/under a +/-0.75 threshold")
+
+```
+
+It appears that we have some strongly correlated variables so we may be able to reduce the complexity of our model by applying principle components analysis:
+
+```{r cache=F, comment = ""}
+pcaObj <- preProcess(training[, -53], method="pca", thresh=.8)
+pcaObj
+```
+
+As we can get 80% of the variance from just 12 variables, there is a good case for applying pca to our data:
+
+```{r cache=F}
+set.seed(1234)
+
+pcaTraining <- predict(pcaObj, training[, -53])
+pcaTesting <- predict(pcaObj, testing[, -53])
+pcaQuiz <- predict(pcaObj, data.quiz.clean[, -53])
+
+
+```
+
+We now have two data sets we can potentially use to train our model - a full set and a reduced pca set.
+
+### Model Training
+
+As this is a classification problem, there are a number of machine learning algorithms we could apply. I decided to try several models against both the full and PCA reduced data sets and to then compare them before choosing a final model.  The families chosen were Decision Tree, Linear Discriminant Analysis and Random Forest.
+
+For each model and each data set we add a model control to apply repeated cross validation with 10 folds repeated 5 times.  We run the training in parallel and centre and scale the variables to normalise them.
+
+```{r message= FALSE}
+library(doMC)
+numCores <- as.numeric(system("nproc", intern = T))
+
+registerDoMC(cores = numCores)
+```
+
+```{r cache =T, message = F}
+
+fitControl <- trainControl(
+                           method = "repeatedcv",
+                           number = 10,
+                           repeats = 5, 
+                           allowParallel=T,
+                           returnResamp = "final")
+
+dataSources <- list("training" = training, "pca_training" = pcaTraining )
+models <- c("rpart", "lda", "rf")
+fits <- list()
+
+for(model in models)
+{
+  for(dataSource in names(dataSources))
+  {
+     modFit<- train(training$classe ~ ., data = dataSources[[dataSource]], method = model, trControl=fitControl, preProc=c("center", "scale"))
+     fits[[paste0(model,"_", dataSource)]] <- modFit
+  }
+  
+  
+}
+
+```
+
+
+### Model Evaluation and Comparison
+
+We now have 6 models which we can use to predict outcomes.  Before we do that, we check to see how well our models performed against the training data they were built uppon by interogating their resampling distributions:
+
+```{r }
+
+resamp <- resamples(fits)
+bwplot(resamp, main= "Prediction accuracy and Kappa values by model")
+
+```
+
+We can see that on the training data, Random Forrest out performed the rest based upon both accuracy and kappa values and generally models built on the PCA version of the training data appear not to do as well as those built on the full data set.  For example the LDA model built on PCA data is outperformed by the classification tree model built on the full training set.
+
+We can also examine if there is a significant statistical difference between the model types based upon the data that was used:
+
+```{r  comment = ""}
+
+resamp <- resamples(fits)
+dif <- diff(resamp)
+summary(dif)
+bwplot(dif, , main= "Differences between accuracy and Kappa values by model")
+
+
+```
+
+We can see that the models are all significantly different from one another based upon the training data and that the biggest difference was between the Random Forest model built on the training data compared to the rpart model built on PCA data.
+
+### Cross-validation
+
+We now cross validate our models by applying them to our testing data to see how well they perform.  
+
+```{r message = F, comment=""}
+
+## keep track of predictions agains quiz data while we are looping
+predictions <- as.data.frame(data.quiz.clean$problem_id)
+oose <- numeric()
+for(model_data in names(fits))
+{
+        cat("---------------------------------------------------------------------------------\n",
+        model_data, "\n",
+        "---------------------------------------------------------------------------------\n", sep="")
+
+  if(grepl(".*_pca.*", model_data)){
+      #predict on pcaTesting data
+      predObj <- predict(fits[[model_data]], pcaTesting)
+      print(confusionMatrix(predObj, testing$classe))
+      ## predict against quiz data while we are looping, used later
+      predictions[model_data] <- predict(fits[[model_data]], pcaQuiz)
+  }
+  else
+  {
+      predObj <- predict(fits[[model_data]], testing)
+      print(confusionMatrix(predObj, testing$classe)) 
+      ## predict against quiz data while we are looping, used later
+      predictions[model_data] <- predict(fits[[model_data]], data.quiz.clean)
+
+  }
+  ## calculate out of sample error based upon testing data
+  oose <- c(oose,(OutOfSampleErrorPercent <- 100 * (1 - sum(predObj == testing$class)/length(predObj))))
+
+}
+
+```
+
+We can see from the above that the Random Forest Model performs the best in terms of accuracy and kappa with values of 0,.992 and 0.99 respectively.  The rpart model using pca data was the worst performing combination (accuracy=0.34, kapp=0.197) and of particular note is its failure to predict outcomes for class C with a sensitivity of 0 and a specificity of 1.0.
+
+### Predictions by model
+
+We can compare the predictions against each of the 20 problem ids and tally up the votes for each class per model:
+
+```{r results = 'asis'}
+
+names(predictions) <- c("problem_id", names(fits))
+tpredictions <- as.data.frame(t(predictions[,-1]))
+votes <- sapply(names(tpredictions), FUN=function(x){ 
+  tbl <-table(tpredictions[,x])
+  paste(names(tbl[tbl == max(tbl)]),  collapse = ",")
+})
+predictions$most_votes <- votes
+
+library(knitr)
+kable(predictions, "html", table.attr='class="flat-table"')
+
+```
+
+
+We can also compare the out of sample error for each of the models by calculating the percentage of cases that the model predicted incorrectly for the testing data set:
+
+```{r results = 'asis'}
+
+ooseDf <- as.data.frame(rbind(oose))
+names(ooseDf) <- names(fits)
+rownames(ooseDf) <- c("Out of sample error (%)")
+kable(ooseDf, "html", table.attr='class="flat-table"')
+
+```
+
+### Final model selection
+
+The model analysis above strongly suggests that the Random Forest model using the full training set is likely to give the most accurate results for predicting our 20 problem ids.  This model was the one finally chosen for submission.
+
+
+
+
+
+
+
